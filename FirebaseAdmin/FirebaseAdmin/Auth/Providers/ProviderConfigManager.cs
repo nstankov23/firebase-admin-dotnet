@@ -165,6 +165,27 @@ namespace FirebaseAdmin.Auth.Providers
                 >(() => request, new ListProviderConfigsPageManager<OidcProviderConfig>());
         }
 
+        internal async Task<SamlProviderConfig> GetSamlProviderConfigAsync(
+            string providerId, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(providerId))
+            {
+                throw new ArgumentException("Provider ID cannot be null or empty.");
+            }
+
+            if (!providerId.StartsWith("saml."))
+            {
+                throw new ArgumentException("SAML provider ID must have the prefix 'saml.'.");
+            }
+
+            var request = this.CreateHttpRequestMessage(
+                HttpMethod.Get, $"inboundSamlConfigs/{providerId}");
+            var response = await this.httpClient
+                .SendAndDeserializeAsync<SamlProviderConfig.Request>(request, cancellationToken)
+                .ConfigureAwait(false);
+            return new SamlProviderConfig(response.Result);
+        }
+
         private static string EncodeQueryParams(IDictionary<string, object> queryParams)
         {
             var queryString = string.Empty;
