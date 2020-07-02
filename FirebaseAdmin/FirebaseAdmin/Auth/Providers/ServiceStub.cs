@@ -1,0 +1,225 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Google.Api.Gax;
+using Google.Api.Gax.Rest;
+using Google.Apis.Discovery;
+using Google.Apis.Json;
+using Google.Apis.Requests;
+using Google.Apis.Services;
+using Newtonsoft.Json.Linq;
+
+namespace FirebaseAdmin.Auth.Providers
+{
+    internal abstract class ServiceStub<T>
+    where T : AuthProviderConfig
+    {
+        protected static readonly HttpMethod Patch = new HttpMethod("PATCH");
+
+        internal abstract Task<T> GetProviderConfigAsync(
+            ApiClient client, string providerId, CancellationToken cancellationToken);
+
+        internal abstract Task<T> CreateProviderConfigAsync(
+            ApiClient client, AuthProviderConfigArgs<T> args, CancellationToken cancellationToken);
+
+        internal abstract Task<T> UpdateProviderConfigAsync(
+            ApiClient client, AuthProviderConfigArgs<T> args, CancellationToken cancellationToken);
+
+        internal abstract PagedAsyncEnumerable<AuthProviderConfigs<T>, T>
+            ListProviderConfigsAsync(ApiClient client, ListProviderConfigsOptions options);
+
+        protected static IList<string> CreateUpdateMask(AuthProviderConfig.Request request)
+        {
+            var json = NewtonsoftJsonSerializer.Instance.Serialize(request);
+            var dictionary = JObject.Parse(json);
+            var mask = CreateUpdateMask(dictionary);
+            mask.Sort();
+            return mask;
+        }
+
+        protected static Uri BuildUri(string path, IDictionary<string, object> queryParams = null)
+        {
+            var uriString = $"{path}{EncodeQueryParams(queryParams)}";
+            return new Uri(uriString, UriKind.Relative);
+        }
+
+        private static string EncodeQueryParams(IDictionary<string, object> queryParams)
+        {
+            var queryString = string.Empty;
+            if (queryParams != null && queryParams.Count > 0)
+            {
+                var list = queryParams.Select(kvp => $"{kvp.Key}={kvp.Value}");
+                queryString = "?" + string.Join("&", list);
+            }
+
+            return queryString;
+        }
+
+        private static List<string> CreateUpdateMask(JObject dictionary)
+        {
+            var mask = new List<string>();
+            foreach (var entry in dictionary)
+            {
+                if (entry.Value.Type == JTokenType.Object)
+                {
+                    var childMask = CreateUpdateMask((JObject)entry.Value);
+                    mask.AddRange(childMask.Select((item) => $"{entry.Key}.{item}"));
+                }
+                else
+                {
+                    mask.Add(entry.Key);
+                }
+            }
+
+            return mask;
+        }
+
+        /// <summary>
+        /// A class for making batch get requests to list a specific type of auth provider
+        /// configurations. An instance of this class is used by the Google API client to provide
+        /// pagination support.
+        /// </summary>
+        protected abstract class AbstractListRequest
+        : IClientServiceRequest<AuthProviderConfigs<T>>
+        {
+            private const int MaxListResults = 100;
+
+            private readonly ApiClient client;
+
+            protected AbstractListRequest(
+                ApiClient client, ListProviderConfigsOptions options)
+            {
+                this.client = client;
+                this.RequestParameters = new Dictionary<string, IParameter>();
+                this.SetPageSize(options?.PageSize);
+                this.SetPageToken(options?.PageToken);
+            }
+
+            public abstract string MethodName { get; }
+
+            public abstract string RestPath { get; }
+
+            public string HttpMethod => "GET";
+
+            public IDictionary<string, IParameter> RequestParameters { get; }
+
+            public IClientService Service { get; }
+
+            protected ApiClient ApiClient => this.client;
+
+            public HttpRequestMessage CreateRequest(bool? overrideGZipEnabled = null)
+            {
+                var query = this.RequestParameters.ToDictionary(
+                    entry => entry.Key, entry => entry.Value.DefaultValue as object);
+                return new HttpRequestMessage()
+                {
+                    Method = System.Net.Http.HttpMethod.Get,
+                    RequestUri = BuildUri(this.RestPath, query),
+                };
+            }
+
+            public async Task<Stream> ExecuteAsStreamAsync(CancellationToken cancellationToken)
+            {
+                var request = this.CreateRequest();
+                var response = await this.ApiClient.SendAsync(request, cancellationToken)
+                    .ConfigureAwait(false);
+                return await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            }
+
+            public Stream ExecuteAsStream()
+            {
+                return this.ExecuteAsStreamAsync().Result;
+            }
+
+            public async Task<Stream> ExecuteAsStreamAsync()
+            {
+                return await this.ExecuteAsStreamAsync(default).ConfigureAwait(false);
+            }
+
+            public AuthProviderConfigs<T> Execute()
+            {
+                return this.ExecuteAsync().Result;
+            }
+
+            public async Task<AuthProviderConfigs<T>> ExecuteAsync()
+            {
+                return await this.ExecuteAsync(default).ConfigureAwait(false);
+            }
+
+            public abstract Task<AuthProviderConfigs<T>> ExecuteAsync(
+                CancellationToken cancellationToken);
+
+            internal void SetPageSize(int? pageSize)
+            {
+                if (pageSize > MaxListResults)
+                {
+                    throw new ArgumentException("Page size must not exceed 100.");
+                }
+                else if (pageSize <= 0)
+                {
+                    throw new ArgumentException("Page size must be positive.");
+                }
+
+                this.AddOrUpdate("pageSize", (pageSize ?? MaxListResults).ToString());
+            }
+
+            internal void SetPageToken(string pageToken)
+            {
+                if (pageToken != null)
+                {
+                    if (pageToken == string.Empty)
+                    {
+                        throw new ArgumentException("Page token must not be empty.");
+                    }
+
+                    this.AddOrUpdate("pageToken", pageToken);
+                }
+                else
+                {
+                    this.RequestParameters.Remove("pageToken");
+                }
+            }
+
+            private void AddOrUpdate(string paramName, string value)
+            {
+                this.RequestParameters[paramName] = new Parameter()
+                {
+                    DefaultValue = value,
+                    IsRequired = true,
+                    Name = paramName,
+                };
+            }
+        }
+
+        /// <summary>
+        /// A Google API client utility for paging through a sequence of provider configurations.
+        /// </summary>
+        protected sealed class PageManager
+        : IPageManager<AbstractListRequest, AuthProviderConfigs<T>, T>
+        {
+            public void SetPageSize(AbstractListRequest request, int pageSize)
+            {
+                request.SetPageSize(pageSize);
+            }
+
+            public void SetPageToken(AbstractListRequest request, string pageToken)
+            {
+                request.SetPageToken(pageToken);
+            }
+
+            public IEnumerable<T> GetResources(AuthProviderConfigs<T> response)
+            {
+                return response?.ProviderConfigs;
+            }
+
+            public string GetNextPageToken(AuthProviderConfigs<T> response)
+            {
+                return string.IsNullOrEmpty(response.NextPageToken) ? null : response.NextPageToken;
+            }
+        }
+    }
+}

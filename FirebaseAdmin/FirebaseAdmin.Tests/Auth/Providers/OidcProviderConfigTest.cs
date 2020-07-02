@@ -578,6 +578,14 @@ namespace FirebaseAdmin.Auth.Providers.Tests
             Assert.Empty(handler.Requests);
         }
 
+        [Fact]
+        public void SomeThing()
+        {
+            var uri = new Uri("foo/bar?test=me", UriKind.Relative);
+            var full = new Uri($"https://google.com/{uri}");
+            Assert.Equal("https://google.com/foo/bar?test=me", full.ToString());
+        }
+
         private void AssertOidcProviderConfig(OidcProviderConfig provider)
         {
             Assert.Equal("oidc.provider", provider.ProviderId);
@@ -604,7 +612,7 @@ namespace FirebaseAdmin.Auth.Providers.Tests
                 yield return new object[]
                 {
                     new OidcProviderConfigArgs(),
-                    "OIDC provider ID must have the prefix 'oidc.'.",
+                    "Provider ID cannot be null or empty.",
                 };
                 yield return new object[]
                 {
@@ -612,7 +620,7 @@ namespace FirebaseAdmin.Auth.Providers.Tests
                     {
                         ProviderId = string.Empty,
                     },
-                    "OIDC provider ID must have the prefix 'oidc.'.",
+                    "Provider ID cannot be null or empty.",
                 };
                 yield return new object[]
                 {
@@ -665,7 +673,7 @@ namespace FirebaseAdmin.Auth.Providers.Tests
                 yield return new object[]
                 {
                     new OidcProviderConfigArgs(),
-                    "OIDC provider ID must have the prefix 'oidc.'.",
+                    "Provider ID cannot be null or empty.",
                 };
                 yield return new object[]
                 {
@@ -673,7 +681,7 @@ namespace FirebaseAdmin.Auth.Providers.Tests
                     {
                         ProviderId = string.Empty,
                     },
-                    "OIDC provider ID must have the prefix 'oidc.'.",
+                    "Provider ID cannot be null or empty.",
                 };
                 yield return new object[]
                 {
